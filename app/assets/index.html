@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birdfy Viewer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Birdfy</h1>
+  <div class="actions">
+    <button id="watchBtn" class="chip" title="Background notifications">Watch: off</button>
+    <button id="refreshBtn" class="chip">Refresh</button>
+    <button id="settingsBtn" class="chip">Settings</button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- Gallery -->
+  <section id="gallery" class="view">
+    <div id="status" class="status"></div>
+    <div id="days"></div>
+  </section>
+
+  <!-- Event detail -->
+  <section id="detail" class="view" hidden>
+    <button class="back" data-back>&larr; Events</button>
+    <div id="detailBody"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="settings" class="view" hidden>
+    <button class="back" data-back>&larr; Events</button>
+    <h2>Settings</h2>
+    <form id="settingsForm">
+      <fieldset>
+        <legend>Birdfy server</legend>
+        <label>Browse API base URL
+          <input name="captureUrl" placeholder="http://your-server:8086" inputmode="url">
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Push (self-hosted ntfy)</legend>
+        <label>Server URL
+          <input name="ntfyUrl" placeholder="https://ntfy.example.lan" inputmode="url">
+        </label>
+        <label>Topic
+          <input name="ntfyTopic" placeholder="birdfy-events">
+        </label>
+        <label>Access token <span class="muted">(optional)</span>
+          <input name="ntfyToken" placeholder="tk_...">
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Species ID</legend>
+        <p class="muted small">On-demand only. Tap “Identify species” on an event and the
+          capture server sends that one thumbnail to a public bird recogniser. No keys, no setup.</p>
+      </fieldset>
+      <div class="row">
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

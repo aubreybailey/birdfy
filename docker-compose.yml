@@ -1,0 +1,31 @@
+services:
+  birdfy:
+    build: ./server
+    container_name: birdfy
+    restart: unless-stopped
+    ports:
+      - "8085:8085"   # feeder uploads land here
+      - "8086:8086"   # gallery, API, viewer
+    environment:
+      TZ: UTC                         # day folders follow this; e.g. America/New_York
+      CAPTURE_DIR: /data/captures
+      CACHE_DIR: /cache
+      CAPTURE_PORT: "8085"
+      BROWSE_PORT: "8086"
+      MAX_BODY_MB: "50"
+      WATCH_INTERVAL: "4"             # seconds between new-event scans
+
+      # Push notifications. Off unless both URL and topic are set.
+      # ntfy is a separate service, not part of this stack.
+      NTFY_URL: ""
+      NTFY_TOPIC: "birdfy-events"
+      NTFY_TOKEN: ""                  # only if your ntfy requires auth
+
+      # Species identification. Public endpoint, no auth or account needed.
+      DEMO_BIRD_URL: "https://object-detect-bird-demo.netvue.co/demo/bird"
+    volumes:
+      - ${CAPTURE_STORE:-./data}:/data/captures
+      - birdfy_cache:/cache
+
+volumes:
+  birdfy_cache:

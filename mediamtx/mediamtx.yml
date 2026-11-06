@@ -1,0 +1,23 @@
+# Minimal MediaMTX config for Birdfy feeder local streaming.
+# Camera pushes RTMP in; we re-expose RTSP/HLS/WebRTC on the LAN.
+logLevel: info
+logDestinations: [stdout]
+
+# Listeners (0.0.0.0 = reachable from other LAN devices / the feeder)
+rtmp: yes
+rtmpAddress: :1935           # <-- point the app's "Add RTMP" here
+rtsp: yes
+rtspAddress: :8554           # VLC/Frigate/Home Assistant pull here
+hls: yes
+hlsAddress: :8888            # browser-friendly
+webrtc: yes
+webrtcAddress: :8889
+api: yes
+apiAddress: 127.0.0.1:9997   # local control/status only
+
+# Accept any stream name pushed in (e.g. rtmp://<ip>:1935/bird).
+# Open while testing; lock down with publishUser/publishPass later.
+pathDefaults:
+  source: publisher
+paths:
+  all_others:
