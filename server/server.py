@@ -297,6 +297,15 @@ def index_day(date):
 
 # ----- media -----
 
+_mp4_locks = {}
+_mp4_locks_guard = threading.Lock()
+
+
+def _mp4_lock(key):
+    with _mp4_locks_guard:
+        return _mp4_locks.setdefault(key, threading.Lock())
+
+
 def event_mp4(date, event_id):
     ev = next((e for e in index_day(date) if e["event_id"] == event_id), None)
     if not ev or not ev["segments"]:
@@ -304,22 +313,48 @@ def event_mp4(date, event_id):
     cdir = os.path.join(CACHE_DIR, date)
     os.makedirs(cdir, exist_ok=True)
     out = os.path.join(cdir, f"{event_id}.mp4")
-    if os.path.exists(out) and os.path.getsize(out) > 0:
-        return out
-    day_dir = os.path.join(CAPTURE_DIR, date)
-    listfile = os.path.join(cdir, f"{event_id}.txt")
-    with open(listfile, "w") as f:
-        for seg in ev["segments"]:
-            f.write(f"file '{os.path.join(day_dir, seg)}'\n")
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
-             "-c", "copy", "-movflags", "+faststart", out],
-            check=True, capture_output=True, timeout=60)
-        return out
-    except Exception as e:
-        print("ffmpeg remux failed:", e, flush=True)
-        return None
+    cached = os.path.exists(out) and os.path.getsize(out) > 0
+    stamp = str(len(ev["segments"]))
+    stampfile = out + ".segs"
+
+    with _mp4_lock(f"{date}/{event_id}"):
+        # An event opened while the feeder is still uploading remuxes only the
+        # segments present at that moment. Rebuild once more have landed,
+        # otherwise the first truncated MP4 would be served forever.
+        if cached:
+            try:
+                with open(stampfile) as f:
+                    if f.read().strip() == stamp:
+                        return out
+            except OSError:
+                pass
+
+        day_dir = os.path.join(CAPTURE_DIR, date)
+        listfile = os.path.join(cdir, f"{event_id}.txt")
+        with open(listfile, "w") as f:
+            for seg in ev["segments"]:
+                f.write(f"file '{os.path.join(day_dir, seg)}'\n")
+        tmp = out + ".tmp"
+        try:
+            subprocess.run(
+                # -f mp4 is required: the temp name ends in .tmp, so ffmpeg
+                # cannot infer the container from the extension.
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
+                 "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp],
+                check=True, capture_output=True, timeout=60)
+            # Rename only on success, so a killed or failed ffmpeg never leaves
+            # a partial file that later reads would treat as a complete remux.
+            os.replace(tmp, out)
+            with open(stampfile, "w") as f:
+                f.write(stamp)
+            return out
+        except Exception as e:
+            print("ffmpeg remux failed:", e, flush=True)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return out if cached else None
 
 
 def mp4_available(date, event_id):
@@ -394,17 +429,51 @@ class BrowseHandler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(obj).encode(), "application/json")
 
     def _file(self, path, ctype):
+        # Safari and iOS will not play a progressive MP4 in <video> unless the
+        # server answers byte-range requests, and seeking needs it everywhere.
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return self._send(404, b"not found\n")
+        rng = (self.headers.get("Range") or "").strip()
+        m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng) if rng else None
+        start, end, partial = 0, size - 1, False
+        if m and size:
+            lo, hi = m.group(1), m.group(2)
+            if lo:
+                start = int(lo)
+                if hi:
+                    end = min(int(hi), size - 1)
+            elif hi:
+                start = max(0, size - int(hi))   # suffix range: trailing N bytes
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            partial = True
         try:
             with open(path, "rb") as f:
-                self._send(200, f.read(), ctype)
+                f.seek(start)
+                body = f.read(end - start + 1)
         except OSError:
-            self._send(404, b"not found\n")
+            return self._send(404, b"not found\n")
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_HEAD(self):
         p = self.path.split("?", 1)[0]
         m = re.fullmatch(rf"/api/event/({DATE_RE})/([^/]+)/video\.mp4", p)
         code = (200 if mp4_available(m.group(1), m.group(2)) else 404) if m else 200
         self.send_response(code)
+        self.send_header("Accept-Ranges", "bytes")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 

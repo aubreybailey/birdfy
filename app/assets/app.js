@@ -88,6 +88,22 @@ function eventCard(date, ev) {
   return card;
 }
 
+// Event ids come from the feeder's upload path and species names from a remote
+// recogniser, so these build text nodes rather than assigning innerHTML.
+function showSpecies(elm, name, confidence) {
+  elm.textContent = "";
+  elm.append(document.createTextNode("Species: "), el("b", { textContent: name }));
+  if (confidence != null) {
+    elm.append(document.createTextNode(" "),
+               el("span", { className: "muted", textContent: `(${confidence}%)` }));
+  }
+}
+
+function showStatus(elm, text) {
+  elm.textContent = "";
+  elm.append(el("span", { className: "muted", textContent: text }));
+}
+
 // ---- detail ----
 function openDetail(date, ev) {
   show("detail");
@@ -106,12 +122,17 @@ function openDetail(date, ev) {
   }).catch(() => {});
 
   const meta = el("div", { className: "meta" });
-  meta.innerHTML = `${fmtTime(ev.time)}<br>event <code>${ev.event_id || ""}</code>` +
-    (ev.segments ? `<br>${ev.segments.length} segment(s)` : "");
+  meta.append(document.createTextNode(fmtTime(ev.time)), el("br"),
+              document.createTextNode("event "),
+              el("code", { textContent: ev.event_id || "" }));
+  if (ev.segments) {
+    meta.append(el("br"), document.createTextNode(`${ev.segments.length} segment(s)`));
+  }
 
   const species = el("div", { className: "species" });
   const known = ev.species || speciesCache[ev.event_id];
-  species.innerHTML = known ? `Species: <b>${known}</b>` : `<span class="muted">Not identified yet.</span>`;
+  if (known) showSpecies(species, known);
+  else showStatus(species, "Not identified yet.");
 
   const idBtn = el("button", { className: "primary", textContent: "Identify species" });
   idBtn.onclick = () => identify(date, ev, species, idBtn);
@@ -129,14 +150,13 @@ async function identify(date, ev, speciesEl, btn) {
                           { method: "POST" });
     const data = await r.json();
     if (r.ok && data.species) {
-      const conf = data.confidence != null ? ` <span class="muted">(${data.confidence}%)</span>` : "";
-      speciesEl.innerHTML = `Species: <b>${data.species}</b>${conf}`;
+      showSpecies(speciesEl, data.species, data.confidence);
       rememberSpecies(ev.event_id, data.species);
     } else {
-      speciesEl.innerHTML = `<span class="muted">${data.reason || "No bird detected"}</span>`;
+      showStatus(speciesEl, data.error || "No bird detected");
     }
   } catch (e) {
-    speciesEl.innerHTML = `<span class="muted">Couldn't reach the recogniser: ${e.message}</span>`;
+    showStatus(speciesEl, `Couldn't reach the recogniser: ${e.message}`);
   } finally {
     btn.disabled = false; btn.textContent = "Identify species";
   }

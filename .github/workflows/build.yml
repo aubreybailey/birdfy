@@ -37,11 +37,18 @@ jobs:
       - name: Restore signing key
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > debug.keystore
+          elif [ "$EVENT_NAME" != "pull_request" ] && [ "$GIT_REF" = "refs/heads/main" ]; then
+            # Publishing a release signed with a throwaway key gives Obtainium a
+            # version that Android then refuses to install over the existing one.
+            echo "::error::KEYSTORE_B64 is not set; refusing to publish an unupgradeable release."
+            exit 1
           else
-            echo "::warning::KEYSTORE_B64 not set; signing with a throwaway key (won't upgrade existing installs)"
+            echo "::warning::KEYSTORE_B64 not set; throwaway key, PR artifact only (won't upgrade installs)"
           fi
 
       - name: Build

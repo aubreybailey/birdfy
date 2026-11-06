@@ -89,9 +89,16 @@ public class NtfyService extends Service {
                 if (base.isEmpty() || topic.isEmpty()) { Thread.sleep(5000); continue; }
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
 
-                URL url = new URL(base + "/" + topic + "/json");
+                // Resume after the last message we saw, so events published
+                // while the stream was down are replayed instead of lost.
+                String last = p.getString("ntfyLastId", "");
+                String since = last.matches("[A-Za-z0-9]+") ? "?since=" + last : "";
+                URL url = new URL(base + "/" + topic + "/json" + since);
                 c = (HttpURLConnection) url.openConnection();
-                c.setReadTimeout(0);            // stream stays open
+                // ntfy sends a keepalive roughly every 45s. With no timeout a
+                // half-open socket blocks readLine forever and the stream dies
+                // silently; this makes it throw so the backoff can reconnect.
+                c.setReadTimeout(90000);
                 c.setConnectTimeout(15000);
                 String token = p.getString("ntfyToken", "").trim();
                 if (!token.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + token);
@@ -118,6 +125,12 @@ public class NtfyService extends Service {
     private void handleLine(String line) {
         try {
             JSONObject o = new JSONObject(line);
+            // Advance the resume point on every frame, keepalives included.
+            String id = o.optString("id", "");
+            if (!id.isEmpty()) {
+                getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                    .edit().putString("ntfyLastId", id).apply();
+            }
             String event = o.optString("event", "message");
             if (!"message".equals(event)) return; // skip keepalive/open
             String body = o.optString("message", "");

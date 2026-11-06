@@ -171,8 +171,10 @@ def signed_headers(sess, extra=None):
     return h
 
 
-def api(method, path, sess=None, json_body=None, raw=None, ctype="application/json", timeout=25):
-    """Signed call to NVS_API_BASE. Retries once after a fresh login on 401/403/sig errors."""
+def api(method, path, sess=None, json_body=None, raw=None, ctype="application/json",
+        timeout=25, relogin=True):
+    """Signed call to NVS_API_BASE. Retries once after a fresh login on 401/403/sig errors.
+    Pass relogin=False when probing paths, so a route miss never triggers a login."""
     sess = sess or get_session()
     url = NVS_API_BASE + "/" + path.lstrip("/")
     data = raw if raw is not None else (json.dumps(json_body).encode() if json_body is not None else None)
@@ -181,8 +183,18 @@ def api(method, path, sess=None, json_body=None, raw=None, ctype="application/js
         code, hdrs, body = _http(method, url, data=data, headers=headers, timeout=timeout)
         obj = _json_body(code, body)
         ret = obj.get("ret") if isinstance(obj, dict) else None
-        sig_err = code in (401, 403) or ret in (73,) or (isinstance(obj, dict) and "SIGNATURE" in str(obj.get("msg", "")).upper())
-        if sig_err and attempt == 1:
+        msg = ""
+        if isinstance(obj, dict):
+            msg = str(obj.get("msg") or obj.get("message") or "").upper().replace("_", " ")
+        # capiv3 sits behind API Gateway, which answers an unknown route with
+        # 403 "Missing Authentication Token". That is a route miss, not a
+        # rejected signature -- treating it as one fires a full password login
+        # per probed path and risks rate-limiting the account.
+        route_miss = "MISSING AUTHENTICATION TOKEN" in msg
+        sig_err = not route_miss and (
+            code == 401 or ret in (73,) or "SIGNATURE" in msg or (code == 403 and not msg)
+        )
+        if sig_err and relogin and attempt == 1:
             _log("auth rejected (HTTP %s ret=%s) — re-login and retry" % (code, ret))
             sess = login()
             continue
@@ -222,7 +234,7 @@ def discover_upload_apply(sess=None, sample=None):
     found = None
     for path in _APPLY_CANDIDATES:
         for method, bodyarg in (("POST", {"json_body": sample}), ("GET", {})):
-            code, obj, _ = api(method, path, sess=sess, **bodyarg)
+            code, obj, _ = api(method, path, sess=sess, relogin=False, **bodyarg)
             tag = "PRESIGN!" if _looks_like_presign(obj) else ""
             msg = obj.get("msg") if isinstance(obj, dict) else ""
             _log("probe %-28s %-4s -> HTTP %s ret=%s %s %s" %
